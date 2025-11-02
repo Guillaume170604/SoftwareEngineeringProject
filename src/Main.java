@@ -35,6 +35,13 @@ public class Main {
         System.out.println("TEST 5 : Grand tableau (10000 éléments)");
         test(generateArray(10000, 1023), "Large");
 
+        // Test 6 : Test personnalisé
+        System.out.println("\n" + "─".repeat(60));
+        System.out.println("TEST 6 : Test personnalisé (500 éléments, max 65535)");
+        // Variable à changer ici pour un test personnalisé
+        test(new int[]{4, 8, 15, 16, 23, 42}, "Custom");
+
+
     }
 
     private static void test(int[] data, String name) {
