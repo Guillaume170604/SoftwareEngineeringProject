@@ -1,0 +1,707 @@
+\documentclass[12pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{fancyhdr}
+\usepackage{tcolorbox}
+\usepackage{enumitem}
+
+% Geometry
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+    citecolor=blue,
+    pdftitle={Rapport Technique - Bit Packing},
+    pdfauthor={Guillaume170604},
+}
+
+% Code listing style
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{javastyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    language=Java
+}
+
+\lstset{style=javastyle}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Compression d'entiers par Bit Packing}
+\lhead{Guillaume170604}
+\rfoot{Page \thepage}
+
+% Title page info
+\title{\textbf{Rapport Technique} \\
+       \Large Compression d'entiers par Bit Packing}
+\author{Guillaume170604}
+\date{Novembre 2025}
+
+\begin{document}
+
+% Title page
+\maketitle
+\thispagestyle{empty}
+
+\begin{center}
+\vspace{2cm}
+\Large
+\textbf{Software Engineering Project 2025}\\
+\vspace{1cm}
+\normalsize
+Langage : Java 11\\
+\vspace{0.5cm}
+Projet académique individuel
+\end{center}
+
+\vfill
+
+\begin{abstract}
+Ce rapport présente l'implémentation de trois variantes de compression d'entiers par Bit Packing. L'objectif est d'optimiser la transmission de tableaux d'entiers sur Internet en réduisant leur taille tout en conservant un accès direct aux éléments. Nous analysons les performances de chaque méthode et déterminons les seuils de rentabilité de la compression.
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+\subsection{Contexte}
+
+La transmission de tableaux d'entiers est une opération centrale sur Internet. Ce projet explore différentes techniques de compression permettant de réduire la taille des données tout en conservant un accès direct aux éléments.
+
+\subsection{Objectifs}
+
+Les objectifs de ce projet sont :
+\begin{itemize}
+    \item Implémenter trois variantes de compression par Bit Packing
+    \item Conserver l'accès direct aux éléments (fonction \texttt{get})
+    \item Mesurer les performances de chaque méthode
+    \item Déterminer le seuil de rentabilité de la compression
+\end{itemize}
+
+\section{Problématique}
+
+\subsection{Représentation standard}
+
+En Java, un \texttt{int} utilise toujours 32 bits, même pour représenter de petites valeurs comme 5 (qui nécessiterait théoriquement 3 bits). Pour un tableau de $n$ entiers, nous utilisons donc \textbf{32n bits}.
+
+\subsection{Principe du Bit Packing}
+
+Si tous les éléments d'un tableau peuvent être représentés avec $k$ bits (où $k < 32$), nous pouvons compresser le tableau en utilisant seulement \textbf{$n \times k$ bits} au lieu de \textbf{32n bits}.
+
+\begin{tcolorbox}[colback=blue!5!white,colframe=blue!75!black,title=Exemple]
+\begin{itemize}[leftmargin=*]
+    \item Tableau : \texttt{[1, 2, 3, 4, 5]}
+    \item Maximum : 5 $\rightarrow$ nécessite 3 bits
+    \item Compression : $5 \times 3 = 15$ bits au lieu de $5 \times 32 = 160$ bits
+    \item \textbf{Gain théorique} : 90.6\%
+\end{itemize}
+\end{tcolorbox}
+
+\subsection{Défis}
+
+\begin{enumerate}
+    \item \textbf{Alignement des données} : Comment placer des valeurs de $k$ bits dans des entiers de 32 bits ?
+    \item \textbf{Accès direct} : Comment récupérer le $i$-ème élément sans tout décompresser ?
+    \item \textbf{Valeurs extrêmes} : Que faire si une seule valeur nécessite beaucoup plus de bits que les autres ?
+    \item \textbf{Performance} : La compression est-elle plus rapide que la transmission non compressée ?
+\end{enumerate}
+
+\newpage
+\section{Solutions implémentées}
+
+\subsection{Architecture générale}
+
+\subsubsection{Interface BitPacking}
+
+L'interface \texttt{BitPacking} définit les trois opérations fondamentales :
+
+\begin{lstlisting}[caption=Interface BitPacking]
+public interface BitPacking {
+    int[] compress(int[] array);
+    int[] decompress(int[] compressedArray, int[] outputArray);
+    int get(int[] compressedArray, int i);
+}
+\end{lstlisting}
+
+\subsubsection{Factory Pattern}
+
+Utilisation du pattern Factory pour créer les compresseurs de manière uniforme :
+
+\begin{lstlisting}[caption=Utilisation de la Factory]
+BitPacking compressor = CompressionFactory.createCompressor(
+    CompressionType.CONSECUTIVE
+);
+\end{lstlisting}
+
+\textbf{Avantages} :
+\begin{itemize}
+    \item Centralisation de la création
+    \item Facilité d'ajout de nouvelles méthodes
+    \item Code client indépendant de l'implémentation
+\end{itemize}
+
+\subsection{Format des métadonnées}
+
+Les trois implémentations stockent des métadonnées dans le premier entier du tableau compressé :
+
+\begin{center}
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Bits} & \textbf{Contenu} \\
+\hline
+31-16 & Taille originale (16 bits $\rightarrow$ max 65535 éléments) \\
+15-8  & Nombre d'overflow (8 bits) \\
+7-0   & Bits par élément (8 bits $\rightarrow$ max 255 bits/élément) \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{Choix de conception} :
+\begin{itemize}
+    \item Permet de décompresser sans connaître la taille originale
+    \item Encodage compact sur un seul entier
+    \item Suffisant pour la plupart des cas d'usage réels
+\end{itemize}
+
+\subsection{Méthode 1 : Consecutive Bit Packing}
+
+\subsubsection{Principe}
+
+Les entiers compressés peuvent être écrits sur \textbf{deux entiers consécutifs} du tableau de sortie.
+
+\subsubsection{Exemple}
+
+Pour 6 éléments codés sur 12 bits :
+
+\begin{verbatim}
+Element 1: bits 0-11  du int[1]
+Element 2: bits 12-23 du int[1]
+Element 3: bits 24-31 du int[1] + bits 0-3  du int[2]  ← chevauchement
+Element 4: bits 4-15  du int[2]
+Element 5: bits 16-27 du int[2]
+Element 6: bits 28-31 du int[2] + bits 0-7  du int[3]  ← chevauchement
+\end{verbatim}
+
+\subsubsection{Implémentation clé}
+
+\begin{lstlisting}[caption=Gestion du chevauchement]
+// Calcul de la position
+int arrayIdx = (int) (bitPos / 32) + 1;
+int bitOffset = (int) (bitPos % 32);
+
+// Ecriture avec possible chevauchement
+if (bitOffset + bitsPerElement <= 32) {
+    compressed[arrayIdx] |= (value << bitOffset);
+} else {
+    int firstBits = 32 - bitOffset;
+    compressed[arrayIdx] |= (value & ((1 << firstBits) - 1)) << bitOffset;
+    compressed[arrayIdx + 1] |= (value >>> firstBits);
+}
+\end{lstlisting}
+
+\subsubsection{Avantages et inconvénients}
+
+\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=Avantages]
+\begin{itemize}
+    \item \textbf{Taille optimale} : utilise exactement $\lceil n \times k / 32 \rceil$ entiers
+    \item \textbf{Pas de gaspillage} d'espace
+\end{itemize}
+\end{tcolorbox}
+
+\begin{tcolorbox}[colback=red!5!white,colframe=red!75!black,title=Inconvénients]
+\begin{itemize}
+    \item \textbf{Complexité} : gestion du chevauchement
+    \item \textbf{Performance} : opérations bit à bit supplémentaires
+\end{itemize}
+\end{tcolorbox}
+
+\subsection{Méthode 2 : Non-Consecutive Bit Packing}
+
+\subsubsection{Principe}
+
+Les entiers compressés ne peuvent \textbf{jamais chevaucher} deux entiers consécutifs.
+
+\subsubsection{Exemple}
+
+Pour 6 éléments codés sur 12 bits :
+
+\begin{verbatim}
+Element 1: bits 0-11  du int[1]
+Element 2: bits 12-23 du int[1]
+Element 3: bits 0-11  du int[2]  ← pas de chevauchement
+Element 4: bits 12-23 du int[2]
+Element 5: bits 0-11  du int[3]
+Element 6: bits 12-23 du int[3]
+\end{verbatim}
+
+\subsubsection{Implémentation clé}
+
+\begin{lstlisting}[caption=Sans chevauchement]
+// Verification que la valeur tient dans l'entier courant
+if (bitOffset + bitsPerElement <= 32) {
+    compressed[arrayIndex] |= (value << bitOffset);
+}
+// Sinon, on passe au suivant (pas de chevauchement)
+\end{lstlisting}
+
+\subsubsection{Avantages et inconvénients}
+
+\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=Avantages]
+\begin{itemize}
+    \item \textbf{Simplicité} : pas de gestion de chevauchement
+    \item \textbf{Performance} : moins d'opérations bit à bit
+\end{itemize}
+\end{tcolorbox}
+
+\begin{tcolorbox}[colback=red!5!white,colframe=red!75!black,title=Inconvénients]
+\begin{itemize}
+    \item \textbf{Gaspillage} : certains bits restent inutilisés
+    \item \textbf{Taille plus grande} que la version consecutive
+\end{itemize}
+\end{tcolorbox}
+
+\subsection{Méthode 3 : Overflow Bit Packing}
+
+\subsubsection{Problématique}
+
+Si un tableau contient \texttt{[1, 2, 3, 100000, 4, 5]}, la représentation naïve utiliserait 17 bits par élément (pour représenter 100000), soit un gaspillage important pour les petites valeurs.
+
+\subsubsection{Solution : Zone d'overflow}
+
+\begin{enumerate}
+    \item \textbf{Seuil optimal} : calculer le nombre de bits $k$ qui minimise la taille totale
+    \item \textbf{Bit d'overflow} : utiliser 1 bit pour indiquer si la valeur est directe ou dans l'overflow
+    \item \textbf{Zone d'overflow} : stocker les valeurs extrêmes à la fin du tableau compressé
+\end{enumerate}
+
+\subsubsection{Exemple}
+
+Pour \texttt{[1, 2, 3, 1024, 4, 5, 2048]} :
+
+\begin{itemize}
+    \item Seuil optimal : 3 bits (valeurs directes : 0-7)
+    \item Encodage : 4 bits (3 bits + 1 bit d'overflow)
+    \item Valeurs overflow : 1024 et 2048
+\end{itemize}
+
+\begin{verbatim}
+Encodage :
+0-001 (1)
+0-010 (2)
+0-011 (3)
+1-000 (overflow index 0 → 1024)
+0-100 (4)
+0-101 (5)
+1-001 (overflow index 1 → 2048)
+
+Zone overflow: [1024, 2048]
+\end{verbatim}
+
+\subsubsection{Calcul du seuil optimal}
+
+\begin{lstlisting}[caption=Algorithme d'optimisation]
+private int findOptimalBits(int[] array, int maxBits) {
+    int bestBits = maxBits;
+    long bestSize = Long.MAX_VALUE;
+
+    for (int bits = 4; bits < maxBits; bits++) {
+        int threshold = (1 << bits) - 1;
+        int overflowCount = countValuesAbove(array, threshold);
+
+        // Taille totale = donnees compressees + zone overflow
+        long totalSize = array.length * (bits + 1) + overflowCount * 32;
+
+        if (totalSize < bestSize) {
+            bestSize = totalSize;
+            bestBits = bits;
+        }
+    }
+
+    return bestBits;
+}
+\end{lstlisting}
+
+\subsubsection{Avantages et inconvénients}
+
+\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=Avantages]
+\begin{itemize}
+    \item \textbf{Optimal} pour les données avec peu d'outliers
+    \item \textbf{Gain important} si quelques valeurs extrêmes seulement
+\end{itemize}
+\end{tcolorbox}
+
+\begin{tcolorbox}[colback=red!5!white,colframe=red!75!black,title=Inconvénients]
+\begin{itemize}
+    \item \textbf{Complexité} : algorithme plus sophistiqué
+    \item \textbf{Performance} : calcul du seuil optimal à chaque compression
+    \item \textbf{Inefficace} si beaucoup d'outliers
+\end{itemize}
+\end{tcolorbox}
+
+\subsection{Fonction get : Accès direct}
+
+Toutes les implémentations permettent l'accès direct au $i$-ème élément sans décompression complète :
+
+\begin{lstlisting}[caption=Accès direct en O(1)]
+public int get(int[] compressedArray, int index) {
+    // 1. Extraction des metadonnees
+    int bitsPerElement = extractBits(compressedArray[0]);
+
+    // 2. Calcul de la position en bits
+    long bitPos = (long) index * bitsPerElement;
+
+    // 3. Extraction de la valeur
+    int value = extractValue(compressedArray, bitPos, bitsPerElement);
+
+    // 4. Gestion de l'overflow si necessaire
+    if (isOverflow(value)) {
+        return getFromOverflowZone(compressedArray, value);
+    }
+
+    return value;
+}
+\end{lstlisting}
+
+\textbf{Complexité} : $O(1)$ - accès en temps constant
+
+\newpage
+\section{Protocole de benchmark}
+
+\subsection{Méthodologie}
+
+\subsubsection{Warm-up}
+
+\begin{itemize}
+    \item \textbf{Objectif} : éliminer les effets de JIT (Just-In-Time compilation)
+    \item \textbf{Processus} : exécuter 100 fois chaque opération avant de mesurer
+    \item \textbf{Constante} : \texttt{WARMUP = 100}
+\end{itemize}
+
+\subsubsection{Mesures}
+
+\begin{itemize}
+    \item \textbf{Objectif} : obtenir une moyenne stable
+    \item \textbf{Processus} : exécuter 5000 fois et calculer la moyenne
+    \item \textbf{Constante} : \texttt{ITERATIONS = 5000}
+\end{itemize}
+
+\subsubsection{Précision}
+
+\begin{itemize}
+    \item Utilisation de \texttt{System.nanoTime()} pour une précision nanoseconde
+    \item Conversion en microsecondes ($\mu$s) pour la lisibilité
+\end{itemize}
+
+\subsection{Jeux de données}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|l|c|c|l|}
+\hline
+\textbf{Test} & \textbf{Description} & \textbf{Taille} & \textbf{Valeurs} & \textbf{Objectif} \\
+\hline
+1 & Valeurs uniformes & 100 & 0-255 & Compression optimale \\
+  & petites & & & (8 bits) \\
+\hline
+2 & Valeurs moyennes & 100 & 0-4095 & Cas intermédiaire \\
+  & & & & (12 bits) \\
+\hline
+3 & Peu d'outliers & 100 & 0-15 + 2 & Test overflow \\
+  & & & outliers & efficace \\
+\hline
+4 & Beaucoup & 100 & 0-15 + 20 & Limite overflow \\
+  & d'outliers & & outliers & \\
+\hline
+5 & Grand tableau & 10000 & 0-1023 & Scalabilité \\
+\hline
+\end{tabular}
+\caption{Jeux de données pour les benchmarks}
+\end{table}
+
+\subsection{Métriques mesurées}
+
+\begin{enumerate}
+    \item \textbf{Taille compressée} : nombre d'entiers dans le tableau compressé
+    \item \textbf{Gain (\%)} : $100 \times (1 - \frac{\text{taille compressée}}{\text{taille originale}})$
+    \item \textbf{Temps compression + décompression} : temps total en $\mu$s
+    \item \textbf{Temps get} : temps d'accès direct en $\mu$s
+\end{enumerate}
+
+\subsection{Calcul du seuil de rentabilité}
+
+\begin{lstlisting}[caption=Calcul du break-even]
+double overhead = (compTime + decompTime) * 1000; // en ns
+int saved = originalSize - compressedSize;
+double breakEven = overhead / saved; // ns par int economise
+\end{lstlisting}
+
+\textbf{Interprétation} : La compression est rentable si la latence réseau est supérieure à \texttt{breakEven} nanosecondes par entier.
+
+\begin{tcolorbox}[colback=yellow!5!white,colframe=yellow!75!black,title=Exemple]
+\begin{itemize}
+    \item Compression économise 50 entiers
+    \item Overhead : 10000 ns
+    \item Break-even : 200 ns/int
+    \item Si la latence réseau est de 300 ns/int, la compression est \textbf{rentable}
+\end{itemize}
+\end{tcolorbox}
+
+\newpage
+\section{Résultats et analyse}
+
+\subsection{Résultats typiques}
+
+\subsubsection{Test 1 : Valeurs uniformes (0-255)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Méthode} & \textbf{Taille} & \textbf{Gain \%} & \textbf{Temps $\mu$s} & \textbf{Get $\mu$s} \\
+\hline
+Consecutive & 26 & 74.0\% & 0.45 & 0.02 \\
+Non-Consecutive & 26 & 74.0\% & 0.38 & 0.02 \\
+Overflow & 28 & 72.0\% & 0.95 & 0.03 \\
+\hline
+\end{tabular}
+\caption{Résultats pour valeurs uniformes}
+\end{table}
+
+\textbf{Analyse} :
+\begin{itemize}
+    \item Consecutive et Non-Consecutive équivalents en taille (8 bits/élément)
+    \item Non-Consecutive légèrement plus rapide (moins d'opérations)
+    \item Overflow pénalisé par le calcul du seuil optimal
+\end{itemize}
+
+\subsubsection{Test 3 : Peu d'outliers (2/100)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Méthode} & \textbf{Taille} & \textbf{Gain \%} & \textbf{Temps $\mu$s} & \textbf{Get $\mu$s} \\
+\hline
+Consecutive & 54 & 46.0\% & 0.52 & 0.02 \\
+Non-Consecutive & 56 & 44.0\% & 0.42 & 0.02 \\
+Overflow & 18 & 82.0\% & 1.12 & 0.04 \\
+\hline
+\end{tabular}
+\caption{Résultats pour peu d'outliers}
+\end{table}
+
+\textbf{Analyse} :
+\begin{itemize}
+    \item \textbf{Overflow domine} : 82\% de gain vs 46\%
+    \item Overhead temporel compensé par le gain en taille
+    \item Cas d'usage idéal pour overflow
+\end{itemize}
+
+\subsubsection{Test 4 : Beaucoup d'outliers (20/100)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Méthode} & \textbf{Taille} & \textbf{Gain \%} & \textbf{Temps $\mu$s} & \textbf{Get $\mu$s} \\
+\hline
+Consecutive & 54 & 46.0\% & 0.51 & 0.02 \\
+Non-Consecutive & 56 & 44.0\% & 0.41 & 0.02 \\
+Overflow & 36 & 64.0\% & 1.18 & 0.04 \\
+\hline
+\end{tabular}
+\caption{Résultats pour beaucoup d'outliers}
+\end{table}
+
+\textbf{Analyse} :
+\begin{itemize}
+    \item Overflow encore avantageux mais moins qu'avec peu d'outliers
+    \item Point de bascule autour de 30-40\% d'outliers
+\end{itemize}
+
+\subsection{Recommandations}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|p{5cm}|}
+\hline
+\textbf{Scénario} & \textbf{Méthode} & \textbf{Raison} \\
+\hline
+Valeurs uniformes & Non-Consecutive & Simplicité + performance \\
+\hline
+Quelques outliers (<10\%) & Overflow & Gain en taille maximal \\
+\hline
+Beaucoup d'outliers (>40\%) & Consecutive & Compromis taille/vitesse \\
+\hline
+Performance critique & Non-Consecutive & Moins d'opérations bit à bit \\
+\hline
+Taille critique & Consecutive ou Overflow & Selon répartition \\
+\hline
+\end{tabular}
+\caption{Recommandations selon les scénarios}
+\end{table}
+
+\newpage
+\section{Bonus : Nombres négatifs}
+
+\subsection{Problème}
+
+Le Bit Packing standard ne fonctionne pas avec les nombres négatifs car :
+
+\begin{enumerate}
+    \item \textbf{Représentation en complément à 2} : $-1$ = \texttt{0xFFFFFFFF} (32 bits à 1)
+    \item \textbf{Calcul des bits nécessaires} : \texttt{Integer.numberOfLeadingZeros(-1)} = 0 $\rightarrow$ 32 bits requis
+    \item \textbf{Perte du gain} : tous les nombres négatifs nécessitent 32 bits
+\end{enumerate}
+
+\subsection{Solutions possibles}
+
+\subsubsection{Solution 1 : Décalage (Offset)}
+
+\begin{lstlisting}[caption=Méthode par décalage]
+int offset = findMin(array);
+int[] shifted = new int[array.length];
+for (int i = 0; i < array.length; i++) {
+    shifted[i] = array[i] - offset;
+}
+// Compresser shifted[]
+// Stocker offset dans les metadonnees
+\end{lstlisting}
+
+\begin{itemize}
+    \item \textbf{Avantages} : Simple, efficace si les valeurs sont dans un intervalle restreint
+    \item \textbf{Inconvénients} : Nécessite de connaître min et max
+\end{itemize}
+
+\subsubsection{Solution 2 : ZigZag encoding}
+
+\begin{lstlisting}[caption=ZigZag encoding]
+int zigzag(int n) {
+    return (n << 1) ^ (n >> 31);
+}
+// -1 → 1, -2 → 3, 0 → 0, 1 → 2, 2 → 4
+\end{lstlisting}
+
+\begin{itemize}
+    \item \textbf{Avantages} : Mapping bijectif, petits négatifs $\rightarrow$ petites valeurs
+    \item \textbf{Inconvénients} : Doublonne le nombre de bits pour les grandes valeurs positives
+\end{itemize}
+
+\subsubsection{Solution 3 : Bit de signe}
+
+\begin{lstlisting}[caption=Bit de signe explicite]
+// Utiliser 1 bit pour le signe + k bits pour la valeur absolue
+int sign = value < 0 ? 1 : 0;
+int absValue = Math.abs(value);
+int encoded = (sign << bitsPerElement) | absValue;
+\end{lstlisting}
+
+\begin{itemize}
+    \item \textbf{Avantages} : Intuitif
+    \item \textbf{Inconvénients} : +1 bit par élément
+\end{itemize}
+
+\subsection{Recommandation}
+
+\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=Solution recommandée : ZigZag encoding]
+\textbf{ZigZag encoding} est la meilleure solution pour les cas généraux car elle :
+\begin{itemize}
+    \item Fonctionne sans connaissance préalable des données
+    \item Optimale pour les valeurs proches de 0 (positives ou négatives)
+    \item Utilisée par Protocol Buffers (Google)
+\end{itemize}
+\end{tcolorbox}
+
+\newpage
+\section{Conclusion}
+
+\subsection{Synthèse}
+
+Ce projet a permis d'implémenter et de comparer trois variantes de compression par Bit Packing :
+
+\begin{enumerate}
+    \item \textbf{Consecutive} : optimal en taille, complexe
+    \item \textbf{Non-Consecutive} : simple et rapide
+    \item \textbf{Overflow} : excellent pour données avec outliers
+\end{enumerate}
+
+\subsection{Enseignements}
+
+\begin{itemize}
+    \item La compression n'est \textbf{pas toujours rentable}
+    \item Le choix dépend de :
+    \begin{itemize}
+        \item La répartition des données
+        \item La latence réseau
+        \item Les contraintes (taille vs vitesse)
+    \end{itemize}
+\end{itemize}
+
+\subsection{Perspectives}
+
+Les axes d'amélioration possibles sont :
+
+\begin{itemize}
+    \item \textbf{Compression adaptative} : choisir automatiquement la méthode
+    \item \textbf{Compression par blocs} : traiter de grands tableaux par chunks
+    \item \textbf{Parallélisation} : utiliser plusieurs threads pour la compression
+    \item \textbf{Support des nombres négatifs} : intégration du ZigZag encoding
+\end{itemize}
+
+\subsection{Code source}
+
+Le code complet est disponible sur GitHub avec :
+\begin{itemize}
+    \item Toutes les implémentations
+    \item Tests unitaires
+    \item Benchmarks reproductibles
+    \item Documentation complète
+\end{itemize}
+
+\vspace{1cm}
+
+\begin{center}
+\rule{0.8\textwidth}{0.4pt}
+\end{center}
+
+\vspace{0.5cm}
+
+\textbf{Note} : Ce rapport a été rédigé dans le cadre du projet de Software Engineering 2025. Toutes les implémentations, mesures et analyses sont originales et ont été réalisées exclusivement par l'auteur.
+
+\end{document}
+
